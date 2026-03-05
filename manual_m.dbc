@@ -1,0 +1,19 @@
+from pyspark.sql import functions as F
+
+dbutils.widgets.text("target_date", "")
+dbutils.widgets.text("target_country", "")
+
+def run_manual_transformation():
+
+    t_date = dbutils.widgets.get("target_date")
+    t_country = dbutils.widgets.get("target_country")
+
+    df = spark.table("zomato.etl.zomato_raw")
+
+    if t_date:
+        df = df.filter(F.col("filedate") == t_date)
+
+    if t_country:
+        df = df.filter(F.col("op_country_name") == t_country)
+
+    df.write.format("delta").mode("append").saveAsTable("zomato.etl.zomato_summary")
