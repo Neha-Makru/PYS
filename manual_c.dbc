@@ -1,0 +1,57 @@
+from pyspark.sql import functions as F
+
+dbutils.widgets.text("target_date", "")
+dbutils.widgets.text("target_country", "")
+
+def run_manual_transformation():
+
+    t_date = dbutils.widgets.get("target_date")
+    t_country = dbutils.widgets.get("target_country")
+
+    df_raw = spark.table("zomato.etl.zomato_raw")
+    df_country = spark.table("zomato.etl.dim_country")
+
+    if t_date:
+        df_raw = df_raw.filter(F.col("filedate") == t_date)
+
+    df = df_raw.join(
+        df_country,
+        df_raw["Country Code"] == df_country["country_code"],
+        "left"
+    ).withColumn(
+        "op_country_name", F.col("country_name")
+    ).withColumn(
+        "op_filedate", F.col("filedate")
+    )
+
+    if t_country:
+        df = df.filter(F.col("op_country_name") == t_country)
+
+    df = df.filter("Cuisines IS NOT NULL AND Cuisines != ''").fillna("NA")
+
+    df = df.dropDuplicates(["Restaurant ID", "op_filedate"])
+
+    df = df.withColumn(
+        "m_rating_colour",
+        F.when(F.col("Aggregate rating").between(1.9, 2.4), "Red")
+         .when(F.col("Aggregate rating").between(2.5, 3.4), "Amber")
+         .when(F.col("Aggregate rating").between(3.5, 3.9), "Light Green")
+         .when(F.col("Aggregate rating").between(4.0, 4.4), "Green")
+         .when(F.col("Aggregate rating").between(4.5, 6.0), "Gold")
+         .otherwise("NA")
+    )
+
+    df = df.withColumn(
+        "m_cuisines",
+        F.when(F.col("Cuisines").contains("Indian"), "Indian")
+         .otherwise("World Cuisines")
+    ).withColumn(
+        "create_datetime", F.current_timestamp()
+    ).withColumn(
+        "user_id", F.lit("ZOMATO_ADMIN")
+    )
+
+    df.write.format("delta") \
+        .mode("append") \
+        .partitionBy("op_filedate", "op_country_name") \
+        .saveAsTable("zomato.etl.zomato_summary")
