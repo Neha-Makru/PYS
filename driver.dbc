@@ -1,0 +1,33 @@
+import uuid
+
+job_id = str(uuid.uuid4())
+
+def log_audit(step, status, desc=""):
+    spark.sql(f"""
+        INSERT INTO zomato.etl.zomato_summary_log 
+        VALUES ('{job_id}', '{step}', '{desc}', current_timestamp(), current_timestamp(), '{status}')
+    """)
+
+try:
+    log_audit("INGESTION", "STARTED", "Setup and Raw Load")
+    run_ingestion()
+
+    log_audit("SUMMARY", "STARTED", "Historical Summary Transformation")
+    run_historical_transformation()
+
+    json_path = "/Volumes/zomato/etl/zomato_files/zomato_etl/source/json/"
+    archive_path = "/Volumes/zomato/etl/zomato_files/zomato_etl/source/archive/"
+
+    for f in dbutils.fs.ls(json_path):
+        dbutils.fs.mv(f.path, archive_path + f.name)
+
+    spark.sql("""
+        DELETE FROM zomato.etl.zomato_summary_log 
+        WHERE job_start_time < current_date() - 7
+    """)
+
+    log_audit("PIPELINE", "SUCCESS", "Execution Finished")
+
+except Exception as e:
+    log_audit("PIPELINE", "FAILED", str(e))
+    raise e
